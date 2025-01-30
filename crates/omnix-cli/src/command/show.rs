@@ -19,6 +19,10 @@ pub struct ShowCommand {
     /// The flake to show outputs for
     #[arg(name = "FLAKE")]
     pub flake_url: FlakeUrl,
+
+    /// Flag to display outputs for all-systems
+    #[arg(long, help = "Show outputs for all systems")]
+    pub all_systems: bool,
 }
 
 /// Tabular representation of a set of flake outputs (eg: `packages.*`)
@@ -90,6 +94,7 @@ impl Row {
 
 impl ShowCommand {
     pub async fn run(&self) -> anyhow::Result<()> {
+        let mut any_table_printed = false;
         let nix_cmd = NixCmd::get().await;
         let nix_config = NixConfig::get().await.as_ref()?;
         let system = &nix_config.system.value;
@@ -97,16 +102,19 @@ impl ShowCommand {
             .await
             .with_context(|| "Unable to fetch flake")?;
 
-        let print_flake_output_table = |title: &str, keys: &[&str], command: Option<String>| {
-            FlakeOutputTable {
+        let mut print_flake_output_table = |title: &str, keys: &[&str], command: Option<String>| {
+            let table = FlakeOutputTable {
                 rows: flake
                     .output
                     .get_by_path(keys)
                     .map_or(vec![], Row::vec_from_flake_output),
                 title: title.to_string(),
                 command,
+            };
+            if !table.rows.is_empty() {
+                table.print();
+                any_table_printed = true;
             }
-            .print();
         };
 
         print_flake_output_table(
@@ -159,6 +167,21 @@ impl ShowCommand {
             Some(format!("nix flake init -t {}#<name>", self.flake_url)),
         );
         print_flake_output_table("📜 Schemas", &["schemas"], None);
+
+        if !any_table_printed {
+            match self.all_systems {
+                true => println!(
+                    "Coming soon: Outputs for all systems for flake: {}",
+                    self.flake_url
+                ),
+                false => println!(
+                    "\n\
+                        🤔 It seems there are no outputs for the system: {}.\n\
+                        🔄 Try using `--all-systems` to view outputs for all systems.",
+                    system
+                ),
+            }
+        }
 
         Ok(())
     }
